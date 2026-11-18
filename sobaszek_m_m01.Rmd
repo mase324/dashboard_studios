@@ -94,7 +94,7 @@ pal <- colorNumeric("YlOrRd", domain = values(kde_r),
                     na.color = "transparent")
 
 leaflet() |>
-  addProviderTiles(providers$Stadia.StamenToner) |>
+  addProviderTiles(providers$OpenTopoMap) |>
   addRasterImage(kde_r, colors = pal, opacity = 0.55) |>
   addLegend(pal = pal, values = values(kde_r),
             title = "Incidents per km<sup>2</sup>",
@@ -112,9 +112,9 @@ Column {data-width=400}
 # point map 
 
 leaflet(pts) |>
-  addProviderTiles(providers$Stadia.StamenToner) |>
+  addProviderTiles(providers$OpenTopoMap) |>
   addPolygons(data = area, fill = FALSE,
-              color = "blue", weight = 2) |>
+              color = "black", weight = 2) |>
   addCircleMarkers(radius = 1, stroke = FALSE,
                    fillOpacity = 0.5,
                    color = "#B2182B",
