@@ -1,0 +1,160 @@
+
+---
+title: "M1 Static Dashboard - Violent Crime in Buffalo, New York"
+subtitle: "M1 · 2021–2025"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: scroll
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(sf)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(leaflet)
+library(lubridate)
+library(tigris)
+library(spatstat.geom)
+library(spatstat.explore)
+library(terra)
+library(plotly)
+
+# Read crime incidents
+raw <- read_csv("data/buffalo_crime_incidents.csv",
+                show_col_types = FALSE)
+
+# Keep selected violent crime categories
+violent_types <- c("Assault", "Robbery", "Sexual Offense",
+                   "Homicide", "SODOMY")
+
+violent_raw <- raw |>
+  filter(`Parent Incident Type` %in% violent_types) |>
+  mutate(
+    date = as.Date(`Incident Date`, format = "%m/%d/%Y"),
+    lon = as.numeric(Longitude),
+    lat = as.numeric(Latitude)) |>
+  filter(!is.na(date),
+         date >= as.Date("2021-01-01"),
+         date <= as.Date("2025-12-31"))
+
+# Buffalo city boundary
+area <- places(state = "NY", cb = TRUE, year = 2020,
+               progress_bar = FALSE) |>
+  filter(NAME == "Buffalo") |>
+  st_transform(4326)
+
+# Convert crime incidents to points
+pts <- violent_raw |>
+  filter(!is.na(lon), !is.na(lat)) |>
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  st_filter(area)
+
+# Number of selected incidents excluded from spatial analysis
+n_excluded <- nrow(violent_raw) - nrow(pts)
+
+n_excluded
+
+
+```
+
+Column {data-width=500}
+-------------------------------------
+
+### Kernel density of violent crime · Buffalo, 2021–2025
+
+```{r kde-map}
+# Buffalo boundary to coordinates
+area_utm <- st_transform(area, 32617) |>
+  st_geometry()
+
+pts_utm <- st_transform(pts, 32617)
+
+# point pattern
+win_buffalo <- as.owin(area_utm)
+pp_all <- as.ppp(st_geometry(pts_utm))
+Window(pp_all) <- win_buffalo
+
+# Kernel density estimation
+kde_km <- density(pp_all, sigma = 600, eps = 100) * 1e6
+
+m <- kde_km$v
+m <- m[nrow(m):1, ]
+
+kde_r <- rast(nrows = nrow(m), ncols = ncol(m),
+              xmin = kde_km$xrange[1], xmax = kde_km$xrange[2],
+              ymin = kde_km$yrange[1], ymax = kde_km$yrange[2],
+              crs = "EPSG:32617",
+              vals = as.vector(t(m)))
+
+pal <- colorNumeric("YlOrRd", domain = values(kde_r),
+                    na.color = "transparent")
+
+leaflet() |>
+  addProviderTiles(providers$Stadia.StamenToner) |>
+  addRasterImage(kde_r, colors = pal, opacity = 0.55) |>
+  addLegend(pal = pal, values = values(kde_r),
+            title = "Incidents per km<sup>2</sup>",
+            position = "bottomright")
+```
+
+> Darker colors indicate higher estimated densities of recorded incidents per km² across 2021–2025. These are incident densities, not population-adjusted crime risks.
+
+Column {data-width=400}
+-------------------------------------
+
+### Violent crime incident locations · Buffalo, 2021–2025
+
+```{r point-map, fig.width=6, fig.height=4}
+# point map 
+
+leaflet(pts) |>
+  addProviderTiles(providers$Stadia.StamenToner) |>
+  addPolygons(data = area, fill = FALSE,
+              color = "blue", weight = 2) |>
+  addCircleMarkers(radius = 1, stroke = FALSE,
+                   fillOpacity = 0.5,
+                   color = "#B2182B",
+                   label = ~as.character(date))
+```
+
+> Each point represents a recorded incident. Overlapping points can hide repeated incidents at the same location.
+
+### Monthly violent crime incidents · Buffalo, 2021–2025
+
+```{r monthly-chart, fig.width=6, fig.height=2.5}
+# for monthly chart
+by_month <- pts |>
+  st_drop_geometry() |>
+  mutate(date = as.Date(date)) |>
+  count(month = lubridate::floor_date(date, "month"))   # cases per month
+
+p <- ggplot(by_month, aes(month, n)) +
+  geom_col(fill = "#B2182B") +
+  labs(x = NULL, y = "Cases per month") +
+  theme_minimal()
+
+ggplotly(p)
+
+
+```
+
+> Monthly bars show the number of recorded incidents with valid dates and locations inside Buffalo, not population-adjusted crime rates.
+
+### About these data
+
+- **Outcome:** Chose to report on violent crime categories (assault, robbery, sexual offense, sodomy, homicide), 2021–2025.
+- **Geography:** Buffalo, New York - individual incident locations
+- **Source:** [Buffalo Open Data — Crime Incidents](https://data.buffalony.gov/Public-Safety/Crime-Incidents/d6g9-xbgu/about_data).
+- **Boundary:** 2020 U.S. Census city boundary, accessed through tigris.
+- **Population at risk:** No total population was used, maps show locations and density, not risk.
+- **Missing data:** 61 lines were excluded from analysis because missing coordinates or locations
+  outside of Buffalo.
+- **Limitation:** The incidents here probably do not represent all crimes that occurred, just the ones reported. Also did not include property crimes.
+
+### AI use note
+
+ChatGPT was used to decide ESPG, help filter for violent_types and violent_raw.
